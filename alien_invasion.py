@@ -1,8 +1,10 @@
 """Alien Invasion Game."""
+import os
 import sys
 from time import sleep
 import pygame
 from game_stats import GameStats
+from scoreboard import Scoreboard
 from button import Button
 from settings import Settings
 from ship import Ship
@@ -14,17 +16,21 @@ class AlienInvasion:
 
     def __init__(self):
         """Initialize the game assets and behavior."""
+        os.environ["SDL_VIDEO_WINDOW_POS"] = "center"
         pygame.init()
         self.clock = pygame.time.Clock()
         self.settings = Settings()
-        self.screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
-        self.settings.screen_width = self.screen.get_rect().width
-        self.settings.screen_height = self.screen.get_rect().height
+        self.screen = pygame.display.set_mode(
+            (self.settings.screen_width, self.settings.screen_height),
+            pygame.RESIZABLE,
+        )
 
         pygame.display.set_caption("Alien Invasion")
 
         # Create an instance to store game statistics.
+        # and create a scoreboard.
         self.stats = GameStats(self)
+        self.sb = Scoreboard(self)
 
         self.bg_color = self.settings.bg_color
         self.ship = Ship(self)
@@ -33,6 +39,8 @@ class AlienInvasion:
         self._create_fleet()
         # Start Alien Invasion in an active state.
         self.game_active = False
+        self.game_over = False
+        self.game_over_font = pygame.font.SysFont(None, 96)
 
         # Make a Play button
         self.play_button = Button(self, "Play Game?")
@@ -60,6 +68,10 @@ class AlienInvasion:
             # Reset game stats
             self.settings.initialize_dynamic_settings()
             self.stats.reset_stats()
+            self.sb.prep_score()
+            self.sb.prep_level()
+            self.sb.prep_ships()
+            self.game_over = False
             self.game_active = True
             # get rid of any remaining bullets
             self.bullets.empty()
@@ -135,32 +147,40 @@ class AlienInvasion:
         # Remove an bullets and aliens that have collided
         collisions = pygame.sprite.groupcollide(
             self.bullets, self.aliens, True, True)
+        if collisions:
+            for aliens in collisions.values():
+                self.stats.score += self.settings.alien_points * len(aliens)
+            self.sb.prep_score()
 
         if not self.aliens:
             # Destroy existing bullets and create a new fleet.
             self.bullets.empty()
             self._create_fleet()
+            self.stats.level += 1
+            self.sb.prep_level()
             self.settings.increase_speed()
 
     def _ship_hit(self):
         """Respond to the ship being hit by an alien."""
-        if self.stats.ships_left > 0:
-            # Decrement ships_left.
-            self.stats.ships_left -= 1
+        self.stats.ships_left -= 1
+        self.sb.prep_ships()
 
-            # Empty the list of aliens and bullets.
-            self.aliens.empty()
-            self.bullets.empty()
+        # Empty the list of aliens and bullets.
+        self.aliens.empty()
+        self.bullets.empty()
 
-            # Create a new fleet and center the ship.
-            self._create_fleet()
-            self.ship.center_ship()
-
-            # Pause.
-            sleep(0.5)
-        else:
+        if self.stats.ships_left <= 0:
             self.game_active = False
-            pygame.mouse.set_visable(True)
+            self.game_over = True
+            pygame.mouse.set_visible(True)
+            return
+
+        # Create a new fleet and center the ship.
+        self._create_fleet()
+        self.ship.center_ship()
+
+        # Pause.
+        sleep(0.5)
 
     def _check_aliens_bottom(self):
         """Check if any aliens have reached the bottom of the screen."""
@@ -201,11 +221,28 @@ class AlienInvasion:
             bullet.draw_bullet()
         self.aliens.draw(self.screen)
 
+        # Draw the score information.
+        self.sb.show_score()
+
         # Draw the Play button if the game is inactive
         if not self.game_active:
             self.play_button.draw_button()
+        if self.game_over:
+            self._draw_game_over()
 
         pygame.display.flip()
+
+    def _draw_game_over(self):
+        """Draw the game-over message over the final scoreboard."""
+        game_over_image = self.game_over_font.render(
+            "Game Over", True, (30, 30, 30), self.bg_color
+        )
+        game_over_rect = game_over_image.get_rect()
+        game_over_rect.center = (
+            self.screen.get_rect().centerx,
+            self.screen.get_rect().centery - 100,
+        )
+        self.screen.blit(game_over_image, game_over_rect)
 
     def run_game(self):
         """Start the main loop for the game."""
